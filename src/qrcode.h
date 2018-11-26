@@ -111,6 +111,149 @@ typedef struct CvHaarClassifierCascade CvHaarClassifierCascade;
 namespace pc
 {
 
+template<int N = 4>
+class Quad
+{
+public:
+    cv::Point2f p[N];  //point
+    float a[N];    //
+
+    float area() const {
+        if (N < 3) { return 0; }
+        float a = 0;
+        for (size_t i = 0; i < N; ++i) {
+            const Point2f& p0 = p[i];
+            const Point2f& p1 = p[(i + 1) % N];
+            a += p0.x * p1.y - p0.y * p1.x;
+        }
+        if (a < 0) { a = -a; }
+        a *= float(0.5);
+        return a;
+    }
+};
+
+class QRQuad : public Quad<4> {
+public:
+    cv::Point2f center; // cros conner
+    float areas;
+    float l[4]; // length of line
+    float a[4]; // angle of line
+    float dir[4]; // direction of line
+    bool selectSelf() {
+        if (areas < 4) {
+            return false;
+        }
+        if (diffAngle(a[0], a[2]) > 30) {
+            return false;
+        }
+        if (diffAngle(a[1], a[3]) > 30) {
+            return false;
+        }
+        float lmax = 0, lmin = 1e10;
+        for (int i = 0; i < 4; ++i) {
+            if (l[i] > lmax) {
+                lmax = l[i];
+            }
+            if (l[i] < lmin) {
+                lmin = l[i];
+            }
+        }
+        if (lmax / lmin > 2) {
+            return false;
+        }
+        return true;
+    }
+    bool selectSimilar(QRQuad& quad) {
+        // centerlocation
+        float rr = pointL2Norm(center, quad.center);
+        if (rr > l[1] / 10) {
+            return false;
+        }
+        float anglethresh = 8;
+        rr = diffAngle(a[0], quad.a[0]);
+        if (rr > 80) rr -= 90;
+        if (rr < anglethresh) return false;
+        rr = diffAngle(a[1], quad.a[1]);
+        if (rr > 80) rr -= 90;
+        if (rr < anglethresh) return false;
+        rr = diffAngle(a[2], quad.a[2]);
+        if (rr > 80) rr -= 90;
+        if (rr < anglethresh) return false;
+        rr = diffAngle(a[3], quad.a[3]);
+        if (rr > 80) rr -= 90;
+        if (rr < anglethresh) return false;
+        rr = diffAngle(dir[0], quad.dir[0]);
+        if (rr > 80) rr -= 90;
+        if (rr < anglethresh) return false;
+        rr = diffAngle(dir[1], quad.dir[1]);
+        if (rr > 80) rr -= 90;
+        if (rr < anglethresh) return false;
+        rr = diffAngle(dir[2], quad.dir[2]);
+        if (rr > 80) rr -= 90;
+        if (rr < anglethresh) return false;
+        rr = diffAngle(dir[3], quad.dir[3]);
+        if (rr > 80) rr -= 90;
+        if (rr < anglethresh) return false;
+        // area
+        rr = areas / quad.areas;
+        if (rr < 4 || rr > 12) return false;
+        return true;
+    }
+    static float pointL2Norm(cv::Point2f a, cv::Point2f b) {
+        return sqrt((a.x - b.x)*(a.x - b.x) + (a.y - b.y)*(a.y - b.y));
+    }
+    static float lineAngle(cv::Point2f a, cv::Point2f b) {
+        if (a.x == b.x) {
+            return 90;
+        }
+        float radv = atan((b.y-a.y)/(b.x-a.x));
+        return radv * 180 / CV_PI;
+    }
+    float diffAngle(float degtan1, float degtan2) {
+        float rr = abs(degtan1 - degtan2);
+        if (rr > 90) {
+            return rr - 90;
+        }
+        return rr;
+    }
+
+    cv::Point2f intersectionLines(cv::Point2f a1, cv::Point2f a2, cv::Point2f b1, cv::Point2f b2)
+    {
+        cv::Point2f result_square_angle(
+            ((a1.x * a2.y - a1.y * a2.x) * (b1.x - b2.x) -
+            (b1.x * b2.y - b1.y * b2.x) * (a1.x - a2.x)) /
+                ((a1.x - a2.x) * (b1.y - b2.y) -
+            (a1.y - a2.y) * (b1.x - b2.x)),
+                    ((a1.x * a2.y - a1.y * a2.x) * (b1.y - b2.y) -
+            (b1.x * b2.y - b1.y * b2.x) * (a1.y - a2.y)) /
+                        ((a1.x - a2.x) * (b1.y - b2.y) -
+            (a1.y - a2.y) * (b1.x - b2.x))
+        );
+        return result_square_angle;
+    }
+
+    QRQuad(cv::Point_<float> points[4]) {
+        p[0] = points[0];
+        p[1] = points[1];
+        p[2] = points[2];
+        p[3] = points[3];
+        center = intersectionLines(p[0], p[2], p[1], p[3]);
+        areas = area();
+        l[0] = pointL2Norm(p[0], p[1]);
+        l[1] = pointL2Norm(p[2], p[1]);
+        l[2] = pointL2Norm(p[2], p[3]);
+        l[3] = pointL2Norm(p[0], p[3]);
+        a[0] = lineAngle(p[0], p[1]);
+        a[1] = lineAngle(p[2], p[1]);
+        a[2] = lineAngle(p[2], p[3]);
+        a[3] = lineAngle(p[0], p[3]);
+        dir[0] = lineAngle(center, p[0]);
+        dir[1] = lineAngle(center, p[1]);
+        dir[2] = lineAngle(center, p[2]);
+        dir[3] = lineAngle(center, p[3]);
+    }
+};
+
 class CV_EXPORTS_W QRCodeDetector
 {
 public:

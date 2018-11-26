@@ -19,16 +19,21 @@
 #include <iostream>
 #include <queue>
 
+#include <apriltag/TagDetector.h>
+
 using namespace cv;
 
 namespace pc
 {
 using std::vector;
 
+
+
 class QRDetect
 {
 public:
     void init(const Mat& src, double eps_vertical_ = 0.2, double eps_horizontal_ = 0.1);
+    bool localizationAT(); // use apriltag to locate key points
     bool localization();
     bool computeTransformationPoints();
     Mat getBinBarcode() { return bin_barcode; }
@@ -306,6 +311,42 @@ void QRDetect::fixationPoints(vector<Point2f> &local_point)
     {
         std::swap(local_point[1], local_point[2]);
     }
+}
+
+bool QRDetect::localizationAT()
+{
+    TagFamily f("Tag36h11");
+    TagDetectorParams params;
+    TagDetector detector(f, params);
+    detector.debug = true;
+    QuadArray atquads = detector.processQR(barcode);
+    vector<QRQuad> quads;
+    for (int i = 0; i < atquads.size(); ++i) {
+        QRQuad quad(atquads[i]->p);
+        if (quad.selectSelf()) {
+            quads.push_back(quad);
+        }
+    }
+    sort(quads.begin(), quads.end(), [](const QRQuad& q1, const QRQuad& q2) {return q1.areas > q2.areas;});
+
+    if (quads.size() < 4) {
+        return false;
+    }
+
+    std::map<int, std::vector<int>> select;
+    for (int i = 0; i < quads.size()-1; ++i) {
+        for (int ii = i+1; ii < quads.size(); ++ii) {
+            if(quads[i].selectSimilar(quads[ii]))
+                select[i].push_back(ii);
+        }
+    }
+
+    for (auto sel : select) {
+        if (sel.second.size() > 1) {
+        }
+    }
+    
+    return false;
 }
 
 bool QRDetect::localization()
@@ -787,7 +828,7 @@ bool QRCodeDetector::detect(InputArray in, OutputArray points) const
 
     QRDetect qrdet;
     qrdet.init(inarr, p->epsX, p->epsY);
-    if (!qrdet.localization()) { return false; }
+    if (!qrdet.localizationAT() && !qrdet.localization()) { return false; }
     if (!qrdet.computeTransformationPoints()) { return false; }
     vector<Point2f> pnts2f = qrdet.getTransformationPoints();
     Mat(pnts2f).convertTo(points, points.fixedType() ? points.type() : CV_32FC2);
